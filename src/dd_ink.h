@@ -72,18 +72,20 @@ struct Ink {
   int dx0 = 0, dy0 = 0, dx1 = -1, dy1 = -1;
   uint16_t* fbFast = nullptr;  // non-null: native RGB565 integer blending
   // per-row dirty spans: a long diagonal stroke's bounding box is mostly
-  // empty, so flush() walks only what was actually stamped
-  static const int MAXROWS = 512;
-  int16_t rowMin[MAXROWS], rowMax[MAXROWS];
+  // empty, so flush() walks only what was actually stamped. Rows beyond
+  // SPAN_ROWS (huge desktop canvases) fall back to the full bbox scan.
+  static const int SPAN_ROWS = 2048;
+  int16_t rowMin[SPAN_ROWS], rowMax[SPAN_ROWS];
+  int spanRows = 0;
 
   bool begin(Canvas* canvas, Rng* rng, uint8_t* covBuf) {
     cv = canvas; R = rng; cov = covBuf;
     cw = cv->width(); ch = cv->height();
-    if (ch > MAXROWS) ch = MAXROWS;
+    spanRows = ch < SPAN_ROWS ? ch : SPAN_ROWS;
     fbFast = cv->fb565();
     dx0 = 0; dy0 = 0; dx1 = -1; dy1 = -1;
-    for (int i = 0; i < ch; i++) { rowMin[i] = 32767; rowMax[i] = -1; }
-    for (int i = 0; i < cw * ch; i++) cov[i] = 0;
+    for (int i = 0; i < spanRows; i++) { rowMin[i] = 32767; rowMax[i] = -1; }
+    for (size_t i = 0; i < (size_t)cw * ch; i++) cov[i] = 0;
     return true;
   }
 
@@ -117,8 +119,10 @@ struct Ink {
       float dy = (float)py + 0.5f - y;
       float dy2 = dy * dy;
       uint8_t* row = cov + py * cw;
-      if (x0 < rowMin[py]) rowMin[py] = (int16_t)x0;
-      if (x1 > rowMax[py]) rowMax[py] = (int16_t)x1;
+      if (py < spanRows) {
+        if (x0 < rowMin[py]) rowMin[py] = (int16_t)x0;
+        if (x1 > rowMax[py]) rowMax[py] = (int16_t)x1;
+      }
       for (int px = x0; px <= x1; px++) {
         float dx = (float)px + 0.5f - x;
         float d2 = dx * dx + dy2;
@@ -147,28 +151,32 @@ struct Ink {
       int a256 = (int)(alpha * 256.0f + 0.5f);
       int sr = c.r >> 3, sg = c.g >> 2, sb = c.b >> 3;
       for (int y = dy0; y <= dy1; y++) {
-        if (rowMax[y] < rowMin[y]) continue;
+        int sx = y < spanRows ? rowMin[y] : dx0;
+        int ex = y < spanRows ? rowMax[y] : dx1;
+        if (ex < sx) continue;
         uint8_t* row = cov + y * cw;
-        for (int x = rowMin[y]; x <= rowMax[y]; x++) {
+        for (int x = sx; x <= ex; x++) {
           if (row[x]) {
             px565(x, y, sr, sg, sb, (a256 * row[x]) >> 8);
             row[x] = 0;
           }
         }
-        rowMin[y] = 32767; rowMax[y] = -1;
+        if (y < spanRows) { rowMin[y] = 32767; rowMax[y] = -1; }
       }
     } else {
       uint8_t col[3] = { c.r, c.g, c.b };
       for (int y = dy0; y <= dy1; y++) {
-        if (rowMax[y] < rowMin[y]) continue;
+        int sx = y < spanRows ? rowMin[y] : dx0;
+        int ex = y < spanRows ? rowMax[y] : dx1;
+        if (ex < sx) continue;
         uint8_t* row = cov + y * cw;
-        for (int x = rowMin[y]; x <= rowMax[y]; x++) {
+        for (int x = sx; x <= ex; x++) {
           if (row[x]) {
             cv->blend(x, y, col, alpha * (float)row[x] * (1.0f / 255.0f));
             row[x] = 0;
           }
         }
-        rowMin[y] = 32767; rowMax[y] = -1;
+        if (y < spanRows) { rowMin[y] = 32767; rowMax[y] = -1; }
       }
     }
     dx1 = -1; dy1 = -1;

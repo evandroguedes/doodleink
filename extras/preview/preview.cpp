@@ -272,13 +272,14 @@ int main(int argc, char** argv) {
     uint32_t sd = argc > 3 ? (uint32_t)strtoul(argv[3], nullptr, 10) : 1;
     const char* out = argc > 4 ? argv[4] : "crew.png";
     int cell = 220;
-    BufCanvas cv(4 * cell, 3 * cell);
+    int cellH = cell * 13 / 10;
+    BufCanvas cv(4 * cell, 3 * cellH);
     uint8_t* cov = (uint8_t*)calloc(cv.W * cv.H, 1);
     paperBackground(cv, sd);
     FaceTraits f;
     for (int i = 0; i < 12; i++) {
       do { rollFace(f, sd++); } while (f.idx[C_VIBE] != vibe);
-      drawFace(cv, cov, f, (i % 4 + 0.5f) * cell, (i / 4 + 0.5f) * cell, cell * 0.56f);
+      drawFace(cv, cov, f, (i % 4 + 0.5f) * cell, (i / 4 + 0.44f) * cellH, cell * 0.5f);
     }
     writePNG(out, cv);
     printf("wrote %s (vibe %s)\n", out, T_VIBE[vibe].name);
@@ -291,7 +292,8 @@ int main(int argc, char** argv) {
   int rows = argc > 4 ? atoi(argv[4]) : 8;
   int cell = argc > 5 ? atoi(argv[5]) : 200;
   const char* out = argc > 6 ? argv[6] : "poster.png";
-  BufCanvas cv(cols * cell, rows * cell);
+  int cellH = cell * 13 / 10;  // faces are taller than wide (shoulders!)
+  BufCanvas cv(cols * cell, rows * cellH);
   uint8_t* cov = (uint8_t*)calloc(cv.W * cv.H, 1);
   paperBackground(cv, seed);
   FaceTraits f;
@@ -301,8 +303,8 @@ int main(int argc, char** argv) {
       rollFace(f, s);
       Rng jr(s ^ 0xC0FFEE);
       float cx = (c + 0.5f) * cell + jr.rr(-0.02f, 0.02f) * cell;
-      float cy = (r + 0.5f) * cell + jr.rr(-0.02f, 0.02f) * cell;
-      drawFace(cv, cov, f, cx, cy, cell * 0.62f);
+      float cy = (r + 0.44f) * cellH + jr.rr(-0.02f, 0.02f) * cell;
+      drawFace(cv, cov, f, cx, cy, cell * 0.52f);
     }
   writePNG(out, cv);
   printf("wrote %s (%dx%d)\n", out, cv.W, cv.H);
