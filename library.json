@@ -1,0 +1,12 @@
+{
+  "name": "doodleink",
+  "version": "0.1.0",
+  "description": "Procedural hand-drawn doodle faces for embedded displays: seeded characters with trait rarities, a rough 3D head for pose, and a wobbly ink renderer. Display-agnostic (TFT, e-paper, desktop).",
+  "keywords": ["display", "graphics", "procedural", "generative", "esp32", "m5stack"],
+  "repository": { "type": "git", "url": "https://github.com/evandroguedes/doodleink.git" },
+  "authors": [{ "name": "Evandro Guedes", "maintainer": true }],
+  "license": "MIT",
+  "headers": "doodleink.h",
+  "frameworks": "*",
+  "platforms": "*"
+}

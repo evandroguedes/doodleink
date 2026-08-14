@@ -1,0 +1,3 @@
+extras/preview/preview
+*.o
+.DS_Store
