@@ -63,6 +63,14 @@ clang++ -O2 -std=c++14 -I../../src preview.cpp -lz -o preview
 device over USB serial (the firmware side is ~15 lines; see any consumer
 project).
 
+## Boards
+
+The engine needs a C++11 compiler and a framebuffer, nothing else. It is
+resolution independent and has run on a 135×240 TFT, desktop RGB buffers,
+and WebAssembly. For a concrete board-by-board list (M5 family, S3
+devices, e-paper plans), see
+[doodlesoul's compatibility table](https://github.com/evandroguedes/doodlesoul#board-compatibility).
+
 ## Notes for MCU use
 
 - The stroke engine nests a few KB of stack buffers — on ESP32 Arduino,
