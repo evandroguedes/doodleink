@@ -8,6 +8,10 @@ tapered strokes, ink crumbs, and paper texture onto any framebuffer.
 
 ![crowd](extras/samples/poster.png)
 
+**Live demo:** [evandroguedes.github.io/doodlesoul](https://evandroguedes.github.io/doodlesoul/)
+— this engine compiled to WebAssembly, animating in your browser (and
+flashing sticks over Web Serial).
+
 Runs full-speed on an ESP32 (an M5StickC Plus animates at ~12 fps — redraw
 with a fresh stroke seed each frame and you get boiling-line animation for
 free). Portable header-only C++11, no heap, no dependencies.
