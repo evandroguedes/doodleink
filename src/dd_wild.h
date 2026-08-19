@@ -83,6 +83,10 @@ struct WildTraits {
   float hairAng0 = -0.5f, hairAng1 = 0.25f;
   float mouthX = 0.1f, mouthY = 0.55f;
   float noseLean = 0.06f;
+  // pose, set by the host after the roll — never rolled, so every soul
+  // that exists today keeps rendering identically. Same units as
+  // FaceTraits: turn/pitch/roll around the resting skew.
+  float turn = 0, pitch = 0, roll = 0;
 };
 
 // forward declaration: defined below rollWild
@@ -547,7 +551,11 @@ struct WildPainter {
   void paint(float cx, float cy, float scale) {
     s = scale;
     w = s * t.wRatio;
-    I.setXform(cx, cy, t.skew);
+    I.setXform(cx, cy, t.skew + t.roll);
+    // the head turns on a cylinder; the fade keeps the shoulders planted
+    if (t.turn != 0 || t.pitch != 0)
+      I.setPose(t.turn * 0.62f, t.pitch * 0.7f, w * 1.12f, s * 1.15f,
+                s * 0.75f, s * 1.25f);
     I.speed = 1;               // no ink crumbs; dry media has its own texture
 
     // contrast decides how loaded the page is
@@ -582,6 +590,7 @@ struct WildPainter {
     accents();
     I.grain = 0;
     I.speed = 0;
+    I.clearPose();
   }
 
   void aura() {

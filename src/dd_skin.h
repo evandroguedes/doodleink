@@ -114,11 +114,25 @@ typedef void (*SkinPaperFn)(Canvas&, uint32_t seed);
 typedef void (*SkinDrawFn)(Canvas&, uint8_t* cov, uint32_t seed,
                            float cx, float cy, float s, uint32_t frameSeed, int speed);
 
+// How the host holds the soul this frame. Every field is optional: the
+// zero pose with mood -1 is exactly the still portrait. Skins interpret
+// what they can (wild has no eyelids to blink, no pupils to aim) and
+// ignore the rest.
+struct SkinPose {
+  float turn = 0, pitch = 0, roll = 0, gazeX = 0;
+  int mood = -1;          // -1 keeps the resting expression
+  uint32_t moodSeed = 1;
+  bool blink = false;
+};
+typedef void (*SkinPosedFn)(Canvas&, uint8_t* cov, uint32_t seed,
+                            float cx, float cy, float s, uint32_t frameSeed,
+                            int speed, const SkinPose& pose);
+
 struct Skin {
   const char* name;
   SkinPaperFn paper;
-  SkinDrawFn draw;
-  bool poseable;   // can the host drive yaw/pitch/mood? (doodle can)
+  SkinDrawFn draw;     // the still portrait, by seed
+  SkinPosedFn posed;   // the living one: same identity, held in a pose
 };
 
 static inline void skinDrawDoodle(Canvas& cv, uint8_t* cov, uint32_t seed,
@@ -138,9 +152,35 @@ static inline void skinDrawWild(Canvas& cv, uint8_t* cov, uint32_t seed,
   drawWildFace(cv, cov, t, cx, cy, s, frameSeed);
 }
 
+static inline void skinPoseDoodle(Canvas& cv, uint8_t* cov, uint32_t seed,
+                                  float cx, float cy, float s, uint32_t frameSeed,
+                                  int speed, const SkinPose& p) {
+  static uint32_t cached = 0;
+  static FaceTraits base;
+  if (cached != seed) { rollFace(base, seed); cached = seed; }
+  FaceTraits live = base;
+  if (p.mood >= 0) applyMood(live, p.mood, p.moodSeed);
+  live.turn = p.turn; live.pitch = p.pitch; live.roll = p.roll; live.gazeX = p.gazeX;
+  if (p.blink) live.idx[C_EYES] = 2;
+  drawFace(cv, cov, live, cx, cy, s, frameSeed, speed);
+}
+
+static inline void skinPoseWild(Canvas& cv, uint8_t* cov, uint32_t seed,
+                                float cx, float cy, float s, uint32_t frameSeed,
+                                int speed, const SkinPose& p) {
+  static uint32_t cached = 0;
+  static WildTraits base;
+  if (cached != seed) { rollWildFromCore(base, soulCore(seed)); cached = seed; }
+  WildTraits live = base;
+  if (p.mood >= 0) applyWildMood(live, p.moodSeed + (uint32_t)p.mood * 2654435761u);
+  live.turn = p.turn; live.pitch = p.pitch; live.roll = p.roll;
+  (void)speed;
+  drawWildFace(cv, cov, live, cx, cy, s, frameSeed);
+}
+
 static const Skin DD_SKINS[] = {
-  { "doodle", paperBackground, skinDrawDoodle, true },
-  { "wild", wildPaper, skinDrawWild, false },
+  { "doodle", paperBackground, skinDrawDoodle, skinPoseDoodle },
+  { "wild", wildPaper, skinDrawWild, skinPoseWild },
 };
 static inline int skinCount() { return 2; }
 

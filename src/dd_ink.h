@@ -66,7 +66,42 @@ struct Ink {
   // 2D placement transform (rotation + translation), applied to all points.
   float tx = 0, ty = 0, rc = 1, rs = 0;
   void setXform(float cx, float cy, float rot) { tx = cx; ty = cy; rc = fcos(rot); rs = fsin(rot); }
-  Vec2 xf(float x, float y) const { Vec2 v = { tx + x * rc - y * rs, ty + x * rs + y * rc }; return v; }
+
+  // Optional 2.5D pose warp (cylinder billboard), applied in local coords
+  // before placement. A flat drawing turns and nods without reprojecting
+  // its geometry: under yaw, x rides a vertical cylinder of radius pwRx
+  // (center shifts by sin, silhouette stays put); under pitch, y rides a
+  // horizontal one of radius pwRy. Points beyond a radius keep the cos
+  // compression only, so margins sway gently instead of jumping. The whole
+  // effect fades from local y pwFade0 to pwFade1, keeping a bust's
+  // shoulders planted while the head turns above them. Purely geometric:
+  // consumes no randomness, so identity is untouched.
+  bool pwOn = false;
+  float pwYc = 1, pwYs = 0, pwPc = 1, pwPs = 0;
+  float pwRx = 1, pwRy = 1, pwFade0 = 0, pwFade1 = 1;
+  void setPose(float yaw, float pitch, float rx, float ry, float fade0, float fade1) {
+    pwOn = yaw != 0 || pitch != 0;
+    pwYc = fcos(yaw); pwYs = fsin(yaw);
+    pwPc = fcos(pitch); pwPs = fsin(pitch);
+    pwRx = rx; pwRy = ry; pwFade0 = fade0; pwFade1 = fade1;
+  }
+  void clearPose() { pwOn = false; }
+
+  Vec2 xf(float x, float y) const {
+    if (pwOn) {
+      float k = 1.0f - 0.85f * clampf((y - pwFade0) / (pwFade1 - pwFade0), 0, 1);
+      float u = x / pwRx, xp;
+      if (u > -1 && u < 1) xp = x * pwYc + pwRx * fastSqrt(1 - u * u) * pwYs;
+      else xp = x * pwYc;
+      float w2 = y / pwRy, yp;
+      if (w2 > -1 && w2 < 1) yp = y * pwPc + pwRy * fastSqrt(1 - w2 * w2) * pwPs;
+      else yp = y * pwPc;
+      x += (xp - x) * k;
+      y += (yp - y) * k;
+    }
+    Vec2 v = { tx + x * rc - y * rs, ty + x * rs + y * rc };
+    return v;
+  }
 
   // Clip polygon (device space after set). Stamps outside are skipped.
   Vec2 clipPts[96];

@@ -48,6 +48,13 @@ are punk souls interpreted by the wild hand:
 // render any soul in any skin, by seed alone:
 dd::DD_SKINS[k].paper(canvas, seed);
 dd::DD_SKINS[k].draw(canvas, covBuf, seed, cx, cy, scale, frame, speed);
+
+// or alive: every skin also takes a pose (turn/pitch/roll, gaze, mood,
+// blink) and interprets what it can — the doodle face reprojects its 3D
+// features; the wild face turns on a cylinder warp, shoulders planted.
+dd::SkinPose pose;
+pose.turn = 0.4f; pose.mood = 1;
+dd::DD_SKINS[k].posed(canvas, covBuf, seed, cx, cy, scale, frame, speed, pose);
 ```
 
 ## How it works
