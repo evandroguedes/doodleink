@@ -42,8 +42,26 @@ struct Ink {
   RGB ink = { 42, 40, 36 };
   RGB paper = { 236, 232, 222 };
   float boost = 1.0f;        // global alpha boost (small screens want ~1.1)
+  float strokeFlush = 0.78f; // stroke() compositing strength; markers want ~0.95
   float minW = 0.6f;         // minimum stroke half-width floor
   int speed = 0;             // 0 = gallery quality, 1 = animation frame (fewer crumbs/passes)
+  // dry-media texture: 0 = wet ink, 1 = crayon skipping over paper tooth.
+  // grainy stamps are attenuated by a fixed spatial noise, so repeated
+  // strokes reveal the same paper fibers, like real wax on rough paper.
+  float grain = 0;
+  uint32_t grainSeed = 7;
+
+  float grainAt(int x, int y) const {
+    // coarse tooth (2px clumps) mixed with fine speckle
+    uint32_t h1 = (uint32_t)((x >> 1) * 0x8DA6B343) ^ (uint32_t)((y >> 1) * 0xD8163841) ^ grainSeed;
+    h1 = (h1 ^ (h1 >> 13)) * 0x5bd1e995u;
+    uint32_t h2 = (uint32_t)(x * 0x9E3779B1) ^ (uint32_t)(y * 0x85EBCA77) ^ grainSeed;
+    h2 = (h2 ^ (h2 >> 13)) * 0x5bd1e995u;
+    float n = 0.65f * ((float)((h1 >> 8) & 0xFFFF) / 65535.0f)
+            + 0.35f * ((float)((h2 >> 8) & 0xFFFF) / 65535.0f);
+    float tooth = n * n * (3 - 2 * n);      // clumpy
+    return (1.0f - grain) + grain * tooth;  // grain=0 solid, grain=1 fully toothy
+  }
 
   // 2D placement transform (rotation + translation), applied to all points.
   float tx = 0, ty = 0, rc = 1, rs = 0;
@@ -127,7 +145,9 @@ struct Ink {
         float dx = (float)px + 0.5f - x;
         float d2 = dx * dx + dy2;
         if (d2 >= R2) continue;
-        uint8_t v = d2 <= Ri2 ? 255 : (uint8_t)((R2 - d2) * invW);
+        float c = d2 <= Ri2 ? 255.0f : (R2 - d2) * invW;
+        if (grain > 0) c *= grainAt(px, py);
+        uint8_t v = (uint8_t)c;
         if (v > row[px]) row[px] = v;
       }
     }
@@ -199,6 +219,7 @@ struct Ink {
         float dd = r + 0.5f - hypotf2((float)px + 0.5f - d.x, (float)py + 0.5f - d.y);
         if (dd <= 0) continue;
         if (dd > 1) dd = 1;
+        if (grain > 0) dd *= grainAt(px, py);
         if (fbFast) px565(px, py, sr, sg, sb, (int)(a256 * dd));
         else cv->blend(px, py, col, alpha * dd);
       }
@@ -227,8 +248,11 @@ struct Ink {
       work[wn - 1].y = y2.y + (y2.y - z.y) / d1 * o.over + (y2.x - z.x) / d1 * f1;
     }
 
+    float plen = 0;
+    for (int i = 1; i < wn; i++) plen += hypotf2(work[i].x - work[i - 1].x, work[i].y - work[i - 1].y);
     P96 rsm;
     float step = w * 0.9f; if (step < 2.2f) step = 2.2f;
+    if (plen / step > 90) step = plen / 90;   // never truncate a long path
     resample(rsm, work, wn, step);
     int m = rsm.n;
     if (m < 3) { sline(work, wn, w, alpha); return; }
@@ -259,7 +283,7 @@ struct Ink {
       prevD = dev; prevR = half;
       if (crumbCount < 96) { crumbC[crumbCount] = dev; crumbN[crumbCount].x = nx * rc - ny * rs; crumbN[crumbCount].y = nx * rs + ny * rc; crumbH[crumbCount] = half; crumbCount++; }
     }
-    flush(ink, alpha * 0.78f);
+    flush(ink, alpha * strokeFlush);
 
     // dry granulation: ink crumbs off the edges, paper biting back in
     if (w >= 1.2f) {
@@ -329,8 +353,12 @@ struct Ink {
   void sline(const Vec2* pts, int n, float w, float alpha, const RGB* colorOverride = nullptr) {
     if (n < 2 || !R) return;
     Rng& r = *R;
+    float plen = 0;
+    for (int i = 1; i < n; i++) plen += hypotf2(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    float rstep = 3.0f;
+    if (plen / rstep > 90) rstep = plen / 90;  // never truncate a long path
     P96 rsm;
-    resample(rsm, pts, n, 3.0f);
+    resample(rsm, pts, n, rstep);
     int m = rsm.n;
     float p1 = r.rr(0, 7), p2 = r.rr(0, 7), f = r.rr(4, 9);
     float lw = w * r.rr(0.75f, 1.3f) * 0.5f;
