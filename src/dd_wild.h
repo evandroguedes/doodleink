@@ -219,13 +219,23 @@ static inline void applyWildMood(WildTraits& t, uint32_t moodSeed) {
 struct WildPainter {
   Ink& I;
   const WildTraits& t;
-  Rng R;
+  Rng R;   // the redraw boil: reseeded every animation frame — margins,
+           // color fields, stroke widths and alphas may re-improvise
+  Rng G;   // the drawing itself: seeded by the soul alone, so the face's
+           // structure — feature places and sizes, glyph geometry, outline
+           // voices — survives the redraw instead of re-rolling per frame
   float s, w;
 
   float fillA = 1, inkA = 1, wMul = 1;   // set from t.contrast in paint()
 
   WildPainter(Ink& ink, const WildTraits& tr, uint32_t strokeSeed)
-    : I(ink), t(tr), R(strokeSeed ^ tr.seed ^ 0x77D1E5u) {}
+    : I(ink), t(tr), R(strokeSeed ^ tr.seed ^ 0x77D1E5u),
+      G(tr.seed * 0x9E3779B9u ^ 0x0FACADEu) {}
+
+  // each feature reseeds G with its own salt, so a mood re-dress that
+  // changes one feature's stroke count (extra mouth box, say) cannot
+  // shift the stream and re-improvise every feature drawn after it
+  void gseed(uint32_t salt) { G = Rng(t.seed * 0x9E3779B9u ^ salt); }
 
   // a path spoken in dots
   void dotLine(const Vec2* p, int n, RGB c, float alpha, float dotR, float gap) {
@@ -315,21 +325,24 @@ struct WildPainter {
     I.sline(p, n, penW() * 2 * wmul, alpha, &c);
   }
 
-  // a bundle of roughly parallel slashes, the basic gesture of the style
-  void slashBundle(float cx, float cy, float ang, float len, int n,
+  // a bundle of roughly parallel slashes, the basic gesture of the style.
+  // N picks the geometry: R for marginalia that may boil freely, G for
+  // hair and beard, whose placement belongs to the face. Widths and
+  // alphas always ride R — thickness breathing is the good kind of alive.
+  void slashBundle(Rng& N, float cx, float cy, float ang, float len, int n,
                    float spread, float wd, RGB c, float alpha, bool crayonTex) {
     if (crayonTex) asCrayon(); else asMarker();
     float dx = fcos(ang), dy = fsin(ang);
     float px = -dy, py = dx;
     for (int i = 0; i < n; i++) {
       float u = ((float)i / (n - 1 > 0 ? n - 1 : 1) - 0.5f) * spread;
-      float jl = len * R.rr(0.75f, 1.2f);
-      float bx = cx + px * u + R.rr(-len * 0.1f, len * 0.1f);
-      float by = cy + py * u + R.rr(-len * 0.1f, len * 0.1f);
-      float aj = ang + R.rr(-0.12f, 0.12f);
+      float jl = len * N.rr(0.75f, 1.2f);
+      float bx = cx + px * u + N.rr(-len * 0.1f, len * 0.1f);
+      float by = cy + py * u + N.rr(-len * 0.1f, len * 0.1f);
+      float aj = ang + N.rr(-0.12f, 0.12f);
       float djx = fcos(aj), djy = fsin(aj);
       Vec2 pts[3] = { { bx - djx * jl * 0.5f, by - djy * jl * 0.5f },
-                      { bx + R.rr(-2, 2), by + R.rr(-2, 2) },
+                      { bx + N.rr(-2, 2), by + N.rr(-2, 2) },
                       { bx + djx * jl * 0.5f, by + djy * jl * 0.5f } };
       gstroke(pts, 3, wd * R.rr(0.8f, 1.25f), c, alpha * R.rr(0.85f, 1.0f));
     }
@@ -510,7 +523,7 @@ struct WildPainter {
     } else if (t.chestMode == 1) {   // stripes
       int nstr = R.ri(2, 4);
       for (int k = 0; k < nstr; k++)
-        slashBundle(nx, sy + drop + s * (0.05f + 0.14f * k), R.rr(-0.06f, 0.06f),
+        slashBundle(R, nx, sy + drop + s * (0.05f + 0.14f * k), R.rr(-0.06f, 0.06f),
                     sw * R.rr(1.3f, 1.6f), 1, 1, crayonW() * R.rr(0.9f, 1.3f),
                     (k & 1) ? cc : W_CRAYON[t.warmCol], 0.75f * fillA, true);
     } else if (t.chestMode == 2) {   // jacket: marker lapels + a dotted zipper
@@ -597,12 +610,12 @@ struct WildPainter {
     RGB c = W_CRAYON[t.auraCol];
     for (int sd = -1; sd <= 1; sd += 2) {
       int n = (int)(R.rr(3, 6) * t.energy);
-      slashBundle(sd * w * R.rr(1.15f, 1.35f), R.rr(-0.4f, 0.3f) * s,
+      slashBundle(R, sd * w * R.rr(1.15f, 1.35f), R.rr(-0.4f, 0.3f) * s,
                   1.35f + R.rr(-0.25f, 0.25f), s * R.rr(0.5f, 0.9f), n,
                   w * 0.45f, crayonW() * 0.95f, c, 0.65f * fillA, true);
     }
     // a few horizontals over the crown
-    slashBundle(R.rr(-0.3f, 0.3f) * w, -s * R.rr(1.0f, 1.15f),
+    slashBundle(R, R.rr(-0.3f, 0.3f) * w, -s * R.rr(1.0f, 1.15f),
                 R.rr(-0.15f, 0.15f), w * R.rr(0.7f, 1.1f), R.ri(2, 3),
                 s * 0.22f, crayonW() * 0.85f, c, 0.45f * fillA, true);
   }
@@ -629,80 +642,81 @@ struct WildPainter {
   }
 
   void hair() {
+    gseed(0x4A19u);
     // the medium decides the voice: dark marker is only one option now
     bool crayonHair = (t.hairMedium == 1);
     bool penHair = (t.hairMedium == 2);
-    RGB hc = crayonHair ? W_CRAYON[R.chance(0.6f) ? t.hotCol : t.spareCol]
+    RGB hc = crayonHair ? W_CRAYON[G.chance(0.6f) ? t.hotCol : t.spareCol]
                         : (penHair ? W_PEN[t.penCol] : W_MARKER[t.markerCol]);
     float hw = crayonHair ? crayonW() : (penHair ? penW() * 2.4f : markerW());
     float ha = (crayonHair ? 0.85f : 0.95f) * inkA;
 
     if (t.hairMode == 0) {         // spike fan
-      slashBundle(-w * R.rr(0.28f, 0.42f), -s * R.rr(0.6f, 0.75f),
-                  1.57f + t.hairAng0, s * R.rr(0.45f, 0.6f), R.ri(6, 9),
-                  w * R.rr(0.55f, 0.7f), hw * 0.9f, hc, ha, crayonHair);
-      slashBundle(w * R.rr(0.22f, 0.42f), -s * R.rr(0.62f, 0.78f),
-                  1.57f + t.hairAng1, s * R.rr(0.4f, 0.55f), R.ri(6, 9),
-                  w * R.rr(0.45f, 0.6f), hw * 0.9f, hc, ha, crayonHair);
+      slashBundle(G, -w * G.rr(0.28f, 0.42f), -s * G.rr(0.6f, 0.75f),
+                  1.57f + t.hairAng0, s * G.rr(0.45f, 0.6f), G.ri(6, 9),
+                  w * G.rr(0.55f, 0.7f), hw * 0.9f, hc, ha, crayonHair);
+      slashBundle(G, w * G.rr(0.22f, 0.42f), -s * G.rr(0.62f, 0.78f),
+                  1.57f + t.hairAng1, s * G.rr(0.4f, 0.55f), G.ri(6, 9),
+                  w * G.rr(0.45f, 0.6f), hw * 0.9f, hc, ha, crayonHair);
     } else if (t.hairMode == 1) {  // swept slabs
-      slashBundle(-w * R.rr(0.2f, 0.4f), -s * R.rr(0.58f, 0.72f),
-                  R.rr(0.45f, 0.85f), s * R.rr(0.4f, 0.55f), R.ri(4, 6),
-                  w * R.rr(0.4f, 0.55f), hw * R.rr(1.2f, 1.6f), hc, ha, crayonHair);
-      slashBundle(w * R.rr(0.2f, 0.45f), -s * R.rr(0.62f, 0.78f),
-                  R.rr(1.9f, 2.4f), s * R.rr(0.35f, 0.5f), R.ri(4, 6),
-                  w * R.rr(0.35f, 0.5f), hw * R.rr(1.1f, 1.5f), hc, ha, crayonHair);
+      slashBundle(G, -w * G.rr(0.2f, 0.4f), -s * G.rr(0.58f, 0.72f),
+                  G.rr(0.45f, 0.85f), s * G.rr(0.4f, 0.55f), G.ri(4, 6),
+                  w * G.rr(0.4f, 0.55f), hw * G.rr(1.2f, 1.6f), hc, ha, crayonHair);
+      slashBundle(G, w * G.rr(0.2f, 0.45f), -s * G.rr(0.62f, 0.78f),
+                  G.rr(1.9f, 2.4f), s * G.rr(0.35f, 0.5f), G.ri(4, 6),
+                  w * G.rr(0.35f, 0.5f), hw * G.rr(1.1f, 1.5f), hc, ha, crayonHair);
     } else if (t.hairMode == 2) {  // low fringe + tuft
-      slashBundle(R.rr(-0.15f, 0.15f) * w, -s * R.rr(0.42f, 0.52f),
-                  R.rr(-0.15f, 0.15f), w * R.rr(0.8f, 1.1f), R.ri(3, 5),
-                  s * 0.16f, hw * R.rr(1.3f, 1.7f), hc, ha, crayonHair);
-      slashBundle(R.rr(-0.2f, 0.3f) * w, -s * R.rr(0.75f, 0.9f),
-                  1.57f + R.rr(-0.4f, 0.4f), s * R.rr(0.25f, 0.4f), R.ri(4, 6),
+      slashBundle(G, G.rr(-0.15f, 0.15f) * w, -s * G.rr(0.42f, 0.52f),
+                  G.rr(-0.15f, 0.15f), w * G.rr(0.8f, 1.1f), G.ri(3, 5),
+                  s * 0.16f, hw * G.rr(1.3f, 1.7f), hc, ha, crayonHair);
+      slashBundle(G, G.rr(-0.2f, 0.3f) * w, -s * G.rr(0.75f, 0.9f),
+                  1.57f + G.rr(-0.4f, 0.4f), s * G.rr(0.25f, 0.4f), G.ri(4, 6),
                   w * 0.35f, hw * 0.9f, hc, ha, crayonHair);
     } else if (t.hairMode == 3) {  // scribble cloud: a pen tangle over color
-      flowPatch(R.rr(-0.15f, 0.15f) * w, -s * R.rr(0.62f, 0.75f),
-                w * R.rr(0.45f, 0.6f), s * R.rr(0.18f, 0.28f),
-                W_CRAYON[R.chance(0.5f) ? t.spareCol : t.hotCol], 0.6f * fillA);
+      flowPatch(G.rr(-0.15f, 0.15f) * w, -s * G.rr(0.62f, 0.75f),
+                w * G.rr(0.45f, 0.6f), s * G.rr(0.18f, 0.28f),
+                W_CRAYON[G.chance(0.5f) ? t.spareCol : t.hotCol], 0.6f * fillA);
       asPen();
       RGB pc = penHair ? W_PEN[t.penCol] : W_PEN[t.loopPen];
-      for (int k = 0; k < R.ri(3, 5); k++) {
+      for (int k = 0; k < G.ri(3, 5); k++) {
         P96 a;
-        float a0 = R.rr(0, TAU);
-        arcPts(a, R.rr(-0.3f, 0.3f) * w, -s * R.rr(0.58f, 0.78f),
-               w * R.rr(0.2f, 0.4f), s * R.rr(0.1f, 0.2f), a0, a0 + R.rr(5.0f, 8.5f), 20);
+        float a0 = G.rr(0, TAU);
+        arcPts(a, G.rr(-0.3f, 0.3f) * w, -s * G.rr(0.58f, 0.78f),
+               w * G.rr(0.2f, 0.4f), s * G.rr(0.1f, 0.2f), a0, a0 + G.rr(5.0f, 8.5f), 20);
         I.sline(a.p, a.n, penW() * 2.1f, 0.75f * inkA, &pc);
       }
     } else if (t.hairMode == 4) {  // flow crest: color sweeping one way
-      float ang = R.chance(0.5f) ? R.rr(-2.6f, -2.1f) : R.rr(-1.0f, -0.5f);
+      float ang = G.chance(0.5f) ? G.rr(-2.6f, -2.1f) : G.rr(-1.0f, -0.5f);
       for (int layer = 0; layer < 2; layer++)
-        slashBundle(R.rr(-0.2f, 0.2f) * w, -s * R.rr(0.6f, 0.75f),
-                    ang + layer * 0.15f, s * R.rr(0.4f, 0.6f), R.ri(5, 8),
-                    w * R.rr(0.5f, 0.7f), crayonW() * 1.1f,
+        slashBundle(G, G.rr(-0.2f, 0.2f) * w, -s * G.rr(0.6f, 0.75f),
+                    ang + layer * 0.15f, s * G.rr(0.4f, 0.6f), G.ri(5, 8),
+                    w * G.rr(0.5f, 0.7f), crayonW() * 1.1f,
                     W_CRAYON[layer == 0 ? t.hotCol : t.spareCol], 0.8f * fillA, true);
     } else if (t.hairMode == 5) {  // grass: many thin ticks along the crown
       asPen();
       RGB pc = W_PEN[t.penCol];
-      int n = R.ri(14, 24);
+      int n = G.ri(14, 24);
       for (int k = 0; k < n; k++) {
         float tt = (float)k / (n - 1);
-        float bx = (tt * 2 - 1) * w * R.rr(0.75f, 0.9f);
-        float by = -s * (0.62f + 0.12f * fsin(tt * 3.1f)) + R.rr(-4, 4);
-        float len = s * R.rr(0.07f, 0.16f);
-        float aa = -1.57f + (tt * 2 - 1) * 0.5f + R.rr(-0.15f, 0.15f);
+        float bx = (tt * 2 - 1) * w * G.rr(0.75f, 0.9f);
+        float by = -s * (0.62f + 0.12f * fsin(tt * 3.1f)) + G.rr(-4, 4);
+        float len = s * G.rr(0.07f, 0.16f);
+        float aa = -1.57f + (tt * 2 - 1) * 0.5f + G.rr(-0.15f, 0.15f);
         Vec2 tk[2] = { { bx, by }, { bx + fcos(aa) * len, by + fsin(aa) * len } };
-        if (R.chance(0.75f)) I.sline(tk, 2, penW() * 2, 0.8f * inkA, &pc);
+        if (G.chance(0.75f)) I.sline(tk, 2, penW() * 2, 0.8f * inkA, &pc);
         else { asCrayon(); gstroke(tk, 2, crayonW() * 0.6f, W_CRAYON[t.spareCol], 0.8f * fillA); asPen(); }
       }
     } else if (t.hairMode == 6) {  // coil springs
       asPen();
       RGB pc = W_PEN[t.penCol];
-      int n = R.ri(5, 8);
+      int n = G.ri(5, 8);
       for (int k = 0; k < n; k++) {
         float tt = (float)k / (n - 1);
-        float bx = (tt * 2 - 1) * w * 0.7f + R.rr(-4, 4);
-        float by = -s * R.rr(0.6f, 0.75f);
-        float cr = s * R.rr(0.035f, 0.06f);
+        float bx = (tt * 2 - 1) * w * 0.7f + G.rr(-4, 4);
+        float by = -s * G.rr(0.6f, 0.75f);
+        float cr = s * G.rr(0.035f, 0.06f);
         P96 sp;
-        float a0 = R.rr(0, TAU);
+        float a0 = G.rr(0, TAU);
         for (int j = 0; j < 16; j++) {
           float jt = (float)j / 15;
           sp.add(bx + fcos(a0 + jt * 2.6f * TAU) * cr * (1 - 0.4f * jt),
@@ -711,22 +725,23 @@ struct WildPainter {
         I.sline(sp.p, sp.n, penW() * 1.9f, 0.8f * inkA, &pc);
       }
     } else {                       // none: a nearly bare crown
-      if (R.chance(0.6f)) {
+      if (G.chance(0.6f)) {
         asPen();
         RGB pc = W_PEN[t.penCol];
-        for (int k = 0; k < R.ri(2, 4); k++) {
-          float bx = R.rr(-0.4f, 0.4f) * w, by = -s * R.rr(0.6f, 0.7f);
-          Vec2 tk[2] = { { bx, by }, { bx + R.rr(-4, 4), by - s * R.rr(0.04f, 0.08f) } };
+        for (int k = 0; k < G.ri(2, 4); k++) {
+          float bx = G.rr(-0.4f, 0.4f) * w, by = -s * G.rr(0.6f, 0.7f);
+          Vec2 tk[2] = { { bx, by }, { bx + G.rr(-4, 4), by - s * G.rr(0.04f, 0.08f) } };
           I.sline(tk, 2, penW() * 1.8f, 0.6f * inkA, &pc);
         }
       }
     }
     // thin pen loops tangled in whatever hair there is
-    if (t.hairMode != 7 && R.chance(0.6f))
+    if (t.hairMode != 7 && G.chance(0.6f))
       loops(-w * 0.5f, -s * 0.6f, w * 0.26f, s * 0.16f, 1, W_PEN[t.penCol]);
   }
 
   void brows() {
+    gseed(0xB405u);
     RGB dark = W_MARKER[t.markerCol];
     float y0 = s * t.browY0, y1 = s * t.browY1;
     for (int i = 0; i < 2; i++) {
@@ -737,7 +752,7 @@ struct WildPainter {
         // an arrow, aimed by the mood
         asPen();
         RGB pc = W_PEN[t.penCol];
-        float tilt = R.rr(-0.12f, 0.2f) * s * 0.2f;
+        float tilt = G.rr(-0.12f, 0.2f) * s * 0.2f;
         Vec2 l[2] = { { bx - bw2, by + tilt }, { bx + bw2, by - tilt } };
         I.sline(l, 2, penW() * 2.6f, 0.88f, &pc);
         Vec2 h1[2] = { { bx + bw2, by - tilt }, { bx + bw2 - s * 0.045f, by - tilt - s * 0.03f } };
@@ -758,17 +773,17 @@ struct WildPainter {
       } else {
         // the heavy slab, kept as one option among glyphs
         asMarker();
-        Vec2 b0[2] = { { bx - bw2 * 1.2f, by + R.rr(-3, 3) }, { bx + bw2 * 1.2f, by + R.rr(-4, 4) } };
-        gstroke(b0, 2, markerW() * R.rr(1.2f, 1.6f), dark, 0.9f);
+        Vec2 b0[2] = { { bx - bw2 * 1.2f, by + G.rr(-3, 3) }, { bx + bw2 * 1.2f, by + G.rr(-4, 4) } };
+        gstroke(b0, 2, markerW() * G.rr(1.2f, 1.6f), dark, 0.9f);
       }
     }
   }
 
   void eyeSpiral(float ex, float ey, float sz, bool heavy) {
     P96 sp;
-    float turns = R.rr(2.2f, 3.2f);
+    float turns = G.rr(2.2f, 3.2f);
     int n = 26;
-    float a0 = R.rr(0, TAU);
+    float a0 = G.rr(0, TAU);
     for (int k = 0; k < n; k++) {
       float tt = (float)k / (n - 1);
       float rr_ = sz * (1.0f - 0.82f * tt);
@@ -784,10 +799,10 @@ struct WildPainter {
     RGB pc = heavy ? W_PEN[t.penCol] : W_PEN[t.tickPen];
     int rings = heavy ? 3 : 2;
     for (int k = 0; k < rings; k++) {
-      float rr_ = sz * (1.0f - 0.3f * k) * R.rr(0.92f, 1.08f);
+      float rr_ = sz * (1.0f - 0.3f * k) * G.rr(0.92f, 1.08f);
       P96 e;
-      float a0 = R.rr(0, TAU);
-      arcPts(e, ex + R.rr(-2, 2), ey + R.rr(-2, 2), rr_, rr_ * 0.85f, a0, a0 + R.rr(5.5f, 6.9f), 16);
+      float a0 = G.rr(0, TAU);
+      arcPts(e, ex + G.rr(-2, 2), ey + G.rr(-2, 2), rr_, rr_ * 0.85f, a0, a0 + G.rr(5.5f, 6.9f), 16);
       I.sline(e.p, e.n, penW() * 2, 0.85f, &pc);
     }
     asMarker();
@@ -813,7 +828,7 @@ struct WildPainter {
     I.sline(r2, 2, penW() * 2, 0.8f, &pc);
     for (int k = 0; k < 3; k++) {
       float yy = ey - sz * 0.5f + k * sz * 0.5f;
-      Vec2 rg[2] = { { ex - sz * 0.9f, yy }, { ex + sz * 0.9f, yy + R.rr(-1.5f, 1.5f) } };
+      Vec2 rg[2] = { { ex - sz * 0.9f, yy }, { ex + sz * 0.9f, yy + G.rr(-1.5f, 1.5f) } };
       I.sline(rg, 2, penW() * 1.8f, 0.75f, &pc);
     }
   }
@@ -822,9 +837,9 @@ struct WildPainter {
     asMarker();
     RGB dark = W_MARKER[t.markerCol];
     for (int k = 0; k < 5; k++) {
-      Vec2 p2[3] = { { ex - w * 0.2f + R.rr(-5, 5), ey + R.rr(-7, 7) },
-                     { ex + R.rr(-5, 5), ey + R.rr(-5, 5) },
-                     { ex + w * 0.2f + R.rr(-5, 5), ey + R.rr(-7, 7) } };
+      Vec2 p2[3] = { { ex - w * 0.2f + G.rr(-5, 5), ey + G.rr(-7, 7) },
+                     { ex + G.rr(-5, 5), ey + G.rr(-5, 5) },
+                     { ex + w * 0.2f + G.rr(-5, 5), ey + G.rr(-7, 7) } };
       gstroke(p2, 3, markerW() * R.rr(1.2f, 1.7f), dark, 0.9f);
     }
   }
@@ -834,7 +849,7 @@ struct WildPainter {
     asPen();
     RGB pc = W_PEN[t.penCol];
     P96 kn;
-    float a0 = R.rr(0, TAU);
+    float a0 = G.rr(0, TAU);
     for (int j = 0; j < 26; j++) {
       float jt = (float)j / 25;
       float rr = sz * (0.4f + 0.6f * fsin(jt * 9.0f + a0));
@@ -845,11 +860,12 @@ struct WildPainter {
   }
 
   void eyes() {
+    gseed(0xE7E5u);
     for (int i = 0; i < 2; i++) {
-      float ex = (i == 0 ? fx0 : fx1) + R.rr(-3, 3);
-      float ey = (i == 0 ? fy0 : fy1) + R.rr(-3, 3);
+      float ex = (i == 0 ? fx0 : fx1) + G.rr(-3, 3);
+      float ey = (i == 0 ? fy0 : fy1) + G.rr(-3, 3);
       bool big = (i == t.bigEye);
-      float sz = big ? w * R.rr(0.16f, 0.22f) : w * R.rr(0.09f, 0.13f);
+      float sz = big ? w * G.rr(0.16f, 0.22f) : w * G.rr(0.09f, 0.13f);
       int g = big ? t.eyeGlyphBig : t.eyeGlyphSmall;
       if (big) {
         if (g == 0) eyeSpiral(ex, ey, sz, true);
@@ -866,21 +882,22 @@ struct WildPainter {
   }
 
   void nose() {
+    gseed(0x905Eu);
     asPen();
     RGB pc = W_PEN[t.penCol];
-    float topY = -s * 0.3f, botY = s * R.rr(0.24f, 0.34f);
+    float topY = -s * 0.3f, botY = s * G.rr(0.24f, 0.34f);
     float nx = (0.08f + t.noseLean) * w;
-    float nw2 = w * R.rr(0.14f, 0.2f);
+    float nw2 = w * G.rr(0.14f, 0.2f);
     if (t.noseGlyph == 0) {
       // a staircase descending the face
       P48 st;
-      int steps = R.ri(3, 4);
+      int steps = G.ri(3, 4);
       float x = nx - nw2 * 0.4f, y = topY;
       st.add(x, y);
       for (int k = 0; k < steps; k++) {
         y += (botY - topY) / steps;
         st.add(x, y);
-        x += nw2 * (0.5f + R.rr(-0.1f, 0.2f)) * (k == steps - 1 ? -1.2f : 1.0f);
+        x += nw2 * (0.5f + G.rr(-0.1f, 0.2f)) * (k == steps - 1 ? -1.2f : 1.0f);
         st.add(x, y);
       }
       I.sline(st.p, st.n, penW() * 2.8f, 0.92f, &pc);
@@ -892,8 +909,8 @@ struct WildPainter {
       gstroke(z, 4, markerW() * 0.7f, W_MARKER[t.markerCol], 0.9f);
     } else {
       // the hook, kept from the old alphabet
-      Vec2 p2[4] = { { nx, topY }, { nx + R.rr(-3, 3), botY * 0.7f },
-                     { nx + R.rr(-2, 4), botY }, { nx - nw2, botY + s * 0.02f } };
+      Vec2 p2[4] = { { nx, topY }, { nx + G.rr(-3, 3), botY * 0.7f },
+                     { nx + G.rr(-2, 4), botY }, { nx - nw2, botY + s * 0.02f } };
       I.sline(p2, 4, penW() * 2.8f, 0.92f, &pc);
     }
     // a flow-following shade beside it (color obeys the current, not the nose)
@@ -902,25 +919,26 @@ struct WildPainter {
   }
 
   void mouth() {
+    gseed(0x300Du);
     float mx = t.mouthX * w, my = t.mouthY * s;
-    float mw2 = w * R.rr(0.38f, 0.52f), mh = s * R.rr(0.05f, 0.08f);
+    float mw2 = w * G.rr(0.38f, 0.52f), mh = s * G.rr(0.05f, 0.08f);
     // the color smear under whatever glyph follows
     asMarker();
-    Vec2 sm[3] = { { mx - mw2 * 0.7f, my + R.rr(-3, 3) }, { mx, my + R.rr(-4, 4) },
-                   { mx + mw2 * 0.8f, my + R.rr(-3, 3) } };
+    Vec2 sm[3] = { { mx - mw2 * 0.7f, my + G.rr(-3, 3) }, { mx, my + G.rr(-4, 4) },
+                   { mx + mw2 * 0.8f, my + G.rr(-3, 3) } };
     gstroke(sm, 3, markerW() * 1.3f, W_CRAYON[t.mouthCol], 0.88f);
     asPen();
     RGB pc = W_PEN[t.penCol];
     if (t.mouthGlyph == 0) {
       // a zipper: the rail, its teeth, and end stops
-      Vec2 rail[2] = { { mx - mw2, my }, { mx + mw2, my + R.rr(-3, 3) } };
+      Vec2 rail[2] = { { mx - mw2, my }, { mx + mw2, my + G.rr(-3, 3) } };
       I.sline(rail, 2, penW() * 2.4f, 0.9f, &pc);
-      int teeth = R.ri(6, 9);
+      int teeth = G.ri(6, 9);
       for (int k = 0; k < teeth; k++) {
         float tt = (float)(k + 1) / (teeth + 1);
         float tx = mx - mw2 + 2 * mw2 * tt;
         float up = (k & 1) ? -1.0f : 1.0f;
-        Vec2 th[2] = { { tx, my + up * 2 }, { tx + R.rr(-1, 1), my + up * mh * 0.9f } };
+        Vec2 th[2] = { { tx, my + up * 2 }, { tx + G.rr(-1, 1), my + up * mh * 0.9f } };
         I.sline(th, 2, penW() * 2, 0.8f, &pc);
       }
       for (int e = -1; e <= 1; e += 2) {
@@ -933,13 +951,13 @@ struct WildPainter {
       asMarker();
       float x = mx - mw2;
       while (x < mx + mw2) {
-        if (R.chance(0.55f)) {
-          float len = s * R.rr(0.04f, 0.07f);
-          Vec2 d0[2] = { { x, my + R.rr(-2, 2) }, { x + len, my + R.rr(-2, 2) } };
+        if (G.chance(0.55f)) {
+          float len = s * G.rr(0.04f, 0.07f);
+          Vec2 d0[2] = { { x, my + G.rr(-2, 2) }, { x + len, my + G.rr(-2, 2) } };
           gstroke(d0, 2, markerW() * 0.8f, W_MARKER[t.markerCol], 0.9f);
           x += len + s * 0.025f;
         } else {
-          I.dot(x, my + R.rr(-2, 2), markerW() * 0.45f, W_MARKER[t.markerCol], 0.9f);
+          I.dot(x, my + G.rr(-2, 2), markerW() * 0.45f, W_MARKER[t.markerCol], 0.9f);
           x += s * 0.04f;
         }
       }
@@ -958,17 +976,18 @@ struct WildPainter {
       // the stacked boxes, kept as one option among glyphs
       float by = my - mh * 0.5f;
       for (int b = 0; b < t.mouthBoxes; b++) {
-        float ox = R.rr(-0.12f, 0.12f) * mw2;
-        Vec2 q[5] = { { mx - mw2 + ox, by }, { mx + mw2 + ox, by + R.rr(-3, 3) },
-                      { mx + mw2 + ox + R.rr(-4, 4), by + mh }, { mx - mw2 + ox + R.rr(-4, 4), by + mh + R.rr(-3, 3) },
+        float ox = G.rr(-0.12f, 0.12f) * mw2;
+        Vec2 q[5] = { { mx - mw2 + ox, by }, { mx + mw2 + ox, by + G.rr(-3, 3) },
+                      { mx + mw2 + ox + G.rr(-4, 4), by + mh }, { mx - mw2 + ox + G.rr(-4, 4), by + mh + G.rr(-3, 3) },
                       { mx - mw2 + ox, by } };
         I.sline(q, 5, penW() * 2, 0.8f, &pc);
-        by += mh * R.rr(0.75f, 1.0f);
+        by += mh * G.rr(0.75f, 1.0f);
       }
     }
   }
 
   void outline() {
+    gseed(0x0DD1u);
     asPen();
     RGB pc = W_PEN[t.penCol];
     float wl = w * t.wAsym, wr = w * (2.0f - t.wAsym);
@@ -979,53 +998,53 @@ struct WildPainter {
     if (t.shapeMode == 1) {
       // faceted: few points, no smoothing, a cut gem of a head
       passes = 0;
-      kp[n++] = { -wl * t.crownW, -s * R.rr(0.58f, 0.68f) };
-      kp[n++] = { -wl * R.rr(0.95f, 1.1f), -s * R.rr(0.05f, 0.2f) };
-      kp[n++] = { -wl * R.rr(0.7f, 0.9f), s * R.rr(0.45f, 0.6f) };
-      kp[n++] = { chin - w * 0.15f, s * R.rr(0.8f, 0.92f) };
-      kp[n++] = { chin + w * R.rr(0.15f, 0.3f), s * R.rr(0.75f, 0.88f) };
-      kp[n++] = { wr * R.rr(0.75f, 0.95f), s * R.rr(0.35f, 0.55f) };
-      kp[n++] = { wr * R.rr(0.9f, 1.08f), -s * R.rr(0.1f, 0.3f) };
-      kp[n++] = { wr * t.crownW, -s * R.rr(0.55f, 0.68f) };
+      kp[n++] = { -wl * t.crownW, -s * G.rr(0.58f, 0.68f) };
+      kp[n++] = { -wl * G.rr(0.95f, 1.1f), -s * G.rr(0.05f, 0.2f) };
+      kp[n++] = { -wl * G.rr(0.7f, 0.9f), s * G.rr(0.45f, 0.6f) };
+      kp[n++] = { chin - w * 0.15f, s * G.rr(0.8f, 0.92f) };
+      kp[n++] = { chin + w * G.rr(0.15f, 0.3f), s * G.rr(0.75f, 0.88f) };
+      kp[n++] = { wr * G.rr(0.75f, 0.95f), s * G.rr(0.35f, 0.55f) };
+      kp[n++] = { wr * G.rr(0.9f, 1.08f), -s * G.rr(0.1f, 0.3f) };
+      kp[n++] = { wr * t.crownW, -s * G.rr(0.55f, 0.68f) };
     } else if (t.shapeMode == 2) {
       // block: flat crown, straightish sides, squared jaw
-      passes = R.chance(0.5f) ? 1 : 0;
-      kp[n++] = { -wl * 0.8f, -s * R.rr(0.6f, 0.7f) };
-      kp[n++] = { -wl * R.rr(0.92f, 1.05f), -s * 0.35f };
-      kp[n++] = { -wl * R.rr(0.9f, 1.0f), s * R.rr(0.45f, 0.6f) };
-      kp[n++] = { -wl * R.rr(0.5f, 0.7f), s * R.rr(0.72f, 0.85f) };
-      kp[n++] = { chin + wr * R.rr(0.4f, 0.6f), s * R.rr(0.72f, 0.85f) };
-      kp[n++] = { wr * R.rr(0.85f, 1.0f), s * R.rr(0.4f, 0.55f) };
-      kp[n++] = { wr * R.rr(0.9f, 1.05f), -s * 0.3f };
-      kp[n++] = { wr * 0.82f, -s * R.rr(0.6f, 0.7f) };
+      passes = G.chance(0.5f) ? 1 : 0;
+      kp[n++] = { -wl * 0.8f, -s * G.rr(0.6f, 0.7f) };
+      kp[n++] = { -wl * G.rr(0.92f, 1.05f), -s * 0.35f };
+      kp[n++] = { -wl * G.rr(0.9f, 1.0f), s * G.rr(0.45f, 0.6f) };
+      kp[n++] = { -wl * G.rr(0.5f, 0.7f), s * G.rr(0.72f, 0.85f) };
+      kp[n++] = { chin + wr * G.rr(0.4f, 0.6f), s * G.rr(0.72f, 0.85f) };
+      kp[n++] = { wr * G.rr(0.85f, 1.0f), s * G.rr(0.4f, 0.55f) };
+      kp[n++] = { wr * G.rr(0.9f, 1.05f), -s * 0.3f };
+      kp[n++] = { wr * 0.82f, -s * G.rr(0.6f, 0.7f) };
     } else if (t.shapeMode == 3) {
       // bulge: one cheek blown out, the other collapsed
-      float bl = R.chance(0.5f) ? 1.4f : 0.72f, br = 2.1f - bl;
+      float bl = G.chance(0.5f) ? 1.4f : 0.72f, br = 2.1f - bl;
       kp[n++] = { -wl * 0.8f, -s * 0.62f };
       kp[n++] = { -wl * bl, -s * 0.1f };
-      kp[n++] = { -wl * bl * R.rr(0.8f, 0.95f), s * 0.35f };
-      kp[n++] = { chin - w * 0.25f, s * R.rr(0.78f, 0.9f) };
-      kp[n++] = { chin + w * R.rr(0.1f, 0.3f), s * R.rr(0.82f, 0.94f) };
-      kp[n++] = { wr * br * R.rr(0.85f, 1.0f), s * 0.3f };
+      kp[n++] = { -wl * bl * G.rr(0.8f, 0.95f), s * 0.35f };
+      kp[n++] = { chin - w * 0.25f, s * G.rr(0.78f, 0.9f) };
+      kp[n++] = { chin + w * G.rr(0.1f, 0.3f), s * G.rr(0.82f, 0.94f) };
+      kp[n++] = { wr * br * G.rr(0.85f, 1.0f), s * 0.3f };
       kp[n++] = { wr * br, -s * 0.15f };
-      kp[n++] = { wr * 0.72f, -s * R.rr(0.55f, 0.68f) };
+      kp[n++] = { wr * 0.72f, -s * G.rr(0.55f, 0.68f) };
     } else {
       // rounded with kinks, the original
       kp[n++] = { -wl * 0.85f, -s * 0.62f };
-      kp[n++] = { -wl * R.rr(0.95f, 1.1f), -s * 0.2f };
-      kp[n++] = { -wl * R.rr(0.9f, 1.05f), s * 0.25f };
-      kp[n++] = { -wl * R.rr(0.6f, 0.8f), s * R.rr(0.6f, 0.72f) };
-      kp[n++] = { chin - w * 0.2f, s * R.rr(0.78f, 0.9f) };
-      kp[n++] = { chin + w * R.rr(0.15f, 0.35f), s * R.rr(0.8f, 0.92f) };
-      kp[n++] = { wr * R.rr(0.65f, 0.85f), s * R.rr(0.55f, 0.7f) };
-      kp[n++] = { wr * R.rr(0.95f, 1.1f), s * 0.2f };
-      kp[n++] = { wr * R.rr(0.9f, 1.05f), -s * 0.3f };
-      kp[n++] = { wr * 0.75f, -s * R.rr(0.55f, 0.7f) };
+      kp[n++] = { -wl * G.rr(0.95f, 1.1f), -s * 0.2f };
+      kp[n++] = { -wl * G.rr(0.9f, 1.05f), s * 0.25f };
+      kp[n++] = { -wl * G.rr(0.6f, 0.8f), s * G.rr(0.6f, 0.72f) };
+      kp[n++] = { chin - w * 0.2f, s * G.rr(0.78f, 0.9f) };
+      kp[n++] = { chin + w * G.rr(0.15f, 0.35f), s * G.rr(0.8f, 0.92f) };
+      kp[n++] = { wr * G.rr(0.65f, 0.85f), s * G.rr(0.55f, 0.7f) };
+      kp[n++] = { wr * G.rr(0.95f, 1.1f), s * 0.2f };
+      kp[n++] = { wr * G.rr(0.9f, 1.05f), -s * 0.3f };
+      kp[n++] = { wr * 0.75f, -s * G.rr(0.55f, 0.7f) };
     }
     // rough the keypoints: corners, not curves
     for (int i = 0; i < n; i++) {
-      kp[i].x += R.rr(-0.04f, 0.04f) * s;
-      kp[i].y += R.rr(-0.04f, 0.04f) * s;
+      kp[i].x += G.rr(-0.04f, 0.04f) * s;
+      kp[i].y += G.rr(-0.04f, 0.04f) * s;
     }
     P96 sm;
     if (passes == 0) { sm.n = 0; for (int i = 0; i < n; i++) sm.add(kp[i]); }
@@ -1035,14 +1054,14 @@ struct WildPainter {
     int npass = (t.contrast == 3) ? 3 : 2;
     for (int pass = 0; pass < npass; pass++) {
       int i0 = 0, i1 = sm.n;
-      if (pass > 0) { i0 = (int)(sm.n * R.rr(0.1f, 0.35f)); i1 = i0 + (int)(sm.n * R.rr(0.3f, 0.55f)); if (i1 > sm.n) i1 = sm.n; }
+      if (pass > 0) { i0 = (int)(sm.n * G.rr(0.1f, 0.35f)); i1 = i0 + (int)(sm.n * G.rr(0.3f, 0.55f)); if (i1 > sm.n) i1 = sm.n; }
       P96 jit;
       jit.n = 0;
-      for (int i = i0; i < i1; i++)
+      for (int i = i0; i < i1; i++)   // the boil lives here, in the path
         jit.add(sm.p[i].x + R.rr(-4, 4) + pass * penW() * 2.5f, sm.p[i].y + R.rr(-4, 4));
       if (jit.n < 2) continue;
       if (pass == 0) { I.sline(jit.p, jit.n, penW() * 2.2f, 0.9f * inkA, &pc); continue; }
-      int voice = R.ri(0, 3);
+      int voice = G.ri(0, 3);
       if (voice == 1)      dotLine(jit.p, jit.n, pc, 0.7f * inkA, penW() * 1.6f, penW() * 6.0f);
       else if (voice == 2) railLine(jit.p, jit.n, pc, 0.6f * inkA, penW() * 4.0f);
       else                 I.sline(jit.p, jit.n, penW() * 2.2f, 0.6f * inkA, &pc);
@@ -1135,9 +1154,10 @@ struct WildPainter {
             R.rr(0, 1), W_CRAYON[t.hotCol], 0.7f);
     // a bearded soul keeps its beard, in slashes
     if (t.beardy) {
+      gseed(0xBEA4Du);
       asMarker();
-      slashBundle(t.chinShift * w, s * R.rr(0.72f, 0.82f), 1.57f + R.rr(-0.25f, 0.25f),
-                  s * R.rr(0.12f, 0.2f), R.ri(4, 7), w * R.rr(0.45f, 0.65f),
+      slashBundle(G, t.chinShift * w, s * G.rr(0.72f, 0.82f), 1.57f + G.rr(-0.25f, 0.25f),
+                  s * G.rr(0.12f, 0.2f), G.ri(4, 7), w * G.rr(0.45f, 0.65f),
                   markerW() * 0.8f, W_MARKER[t.markerCol], 0.85f, false);
     }
   }
