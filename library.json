@@ -1,6 +1,6 @@
 {
   "name": "doodleink",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Procedural hand-drawn faces for embedded displays, in two styles: naive ink doodles and crayon-marker expressionism. Seeded characters with trait rarities, skins that reinterpret the same soul, display-agnostic (TFT, e-paper, desktop).",
   "keywords": ["display", "graphics", "procedural", "generative", "esp32", "m5stack"],
   "repository": { "type": "git", "url": "https://github.com/evandroguedes/doodleink.git" },

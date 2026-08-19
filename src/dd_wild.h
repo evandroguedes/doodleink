@@ -554,7 +554,7 @@ struct WildPainter {
     I.setXform(cx, cy, t.skew + t.roll);
     // the head turns on a cylinder; the fade keeps the shoulders planted
     if (t.turn != 0 || t.pitch != 0)
-      I.setPose(t.turn * 0.62f, t.pitch * 0.7f, w * 1.12f, s * 1.15f,
+      I.setPose(t.turn * 0.8f, t.pitch * 0.7f, w * 1.12f, s * 1.15f,
                 s * 0.75f, s * 1.25f);
     I.speed = 1;               // no ink crumbs; dry media has its own texture
 

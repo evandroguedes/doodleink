@@ -79,11 +79,17 @@ struct Ink {
   bool pwOn = false;
   float pwYc = 1, pwYs = 0, pwPc = 1, pwPs = 0;
   float pwRx = 1, pwRy = 1, pwFade0 = 0, pwFade1 = 1;
+  float pwOffX = 0, pwOffY = 0;
   void setPose(float yaw, float pitch, float rx, float ry, float fade0, float fade1) {
     pwOn = yaw != 0 || pitch != 0;
     pwYc = fcos(yaw); pwYs = fsin(yaw);
     pwPc = fcos(pitch); pwPs = fsin(pitch);
     pwRx = rx; pwRy = ry; pwFade0 = fade0; pwFade1 = fade1;
+    // the head carries over the neck into the turn (dd_face shifts its
+    // skull by turn*w*0.16 for the same reason): silhouette and margins
+    // translate too, which is what sells the rotation
+    pwOffX = pwYs * rx * 0.18f;
+    pwOffY = pwPs * ry * 0.12f;
   }
   void clearPose() { pwOn = false; }
 
@@ -96,8 +102,8 @@ struct Ink {
       float w2 = y / pwRy, yp;
       if (w2 > -1 && w2 < 1) yp = y * pwPc + pwRy * fastSqrt(1 - w2 * w2) * pwPs;
       else yp = y * pwPc;
-      x += (xp - x) * k;
-      y += (yp - y) * k;
+      x += (xp - x + pwOffX) * k;
+      y += (yp - y + pwOffY) * k;
     }
     Vec2 v = { tx + x * rc - y * rs, ty + x * rs + y * rc };
     return v;
