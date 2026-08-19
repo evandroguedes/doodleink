@@ -6,3 +6,5 @@
 #include "dd_core.h"
 #include "dd_ink.h"
 #include "dd_face.h"
+#include "dd_wild.h"
+#include "dd_skin.h"

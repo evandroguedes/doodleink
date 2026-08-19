@@ -7,6 +7,9 @@
 //         ./preview big    <seed> [px] [out.png]
 //         ./preview calib  [n]                     (score histogram for tiers)
 //         ./preview anim   <seed> [frames] [out.gif]  (animated device simulation)
+//         ./preview wild   <seed> [px] [out.png]
+//         ./preview wildposter <seed> [cols] [rows] [cell] [out.png]
+//         ./preview wildanim <seed> [frames] [out.gif]  (animated wild portrait)
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -284,6 +287,147 @@ int main(int argc, char** argv) {
     writePNG(out, cv);
     printf("wrote %s (vibe %s)\n", out, T_VIBE[vibe].name);
     free(cov);
+    return 0;
+  }
+
+  if (!strcmp(mode, "wild")) {  // the crayon-expressionist style, one portrait
+    int pw = argc > 3 ? atoi(argv[3]) : 480;
+    int ph = pw * 4 / 3;
+    BufCanvas cv(pw, ph);
+    uint8_t* cov = (uint8_t*)calloc((size_t)cv.W * cv.H, 1);
+    wildPaper(cv, seed);
+    WildTraits t;
+    rollWild(t, seed);
+    drawWildFace(cv, cov, t, pw * 0.5f, ph * 0.47f, ph * 0.36f);
+    const char* out = argc > 4 ? argv[4] : "wild.png";
+    writePNG(out, cv);
+    printf("wrote %s (seed %u, energy %.2f)\n", out, seed, t.energy);
+    free(cov);
+    return 0;
+  }
+
+  if (!strcmp(mode, "skinpair")) {  // one soul, two artists, side by side
+    int px = argc > 3 ? atoi(argv[3]) : 420;
+    int ph = px * 4 / 3;
+    BufCanvas out(px * 2 + 24, ph);
+    for (size_t i = 0; i < (size_t)out.W * out.H * 3; i++) out.px[i] = 235;
+    uint8_t* cov = (uint8_t*)calloc((size_t)px * ph, 1);
+    for (int k = 0; k < skinCount(); k++) {
+      BufCanvas half(px, ph);
+      DD_SKINS[k].paper(half, seed * 7u + 3u);
+      DD_SKINS[k].draw(half, cov, seed, px * 0.5f, ph * 0.47f, ph * (k == 0 ? 0.31f : 0.36f), 0, 0);
+      int ox = k * (px + 24);
+      for (int y = 0; y < ph; y++)
+        memcpy(out.px + ((size_t)y * out.W + ox) * 3, half.px + (size_t)y * px * 3, px * 3);
+    }
+    const char* outp = argc > 4 ? argv[4] : "skinpair.png";
+    writePNG(outp, out);
+    printf("wrote %s (soul %08x in %d skins)\n", outp, seed, skinCount());
+    free(cov);
+    return 0;
+  }
+
+  if (!strcmp(mode, "wildposter")) {  // grid of wild portraits
+    int cols = argc > 3 ? atoi(argv[3]) : 4;
+    int rows = argc > 4 ? atoi(argv[4]) : 3;
+    int cell = argc > 5 ? atoi(argv[5]) : 300;
+    int cellH = cell * 4 / 3;
+    BufCanvas cv(cols * cell, rows * cellH);
+    uint8_t* cov = (uint8_t*)calloc((size_t)cv.W * cv.H, 1);
+    wildPaper(cv, seed);
+    WildTraits t;
+    for (int r = 0; r < rows; r++)
+      for (int c = 0; c < cols; c++) {
+        rollWild(t, seed + r * cols + c);
+        drawWildFace(cv, cov, t, (c + 0.5f) * cell, (r + 0.47f) * cellH, cellH * 0.34f);
+      }
+    const char* out = argc > 6 ? argv[6] : "wildposter.png";
+    writePNG(out, cv);
+    printf("wrote %s\n", out);
+    free(cov);
+    return 0;
+  }
+
+  if (!strcmp(mode, "wildtribe")) {  // 4x3 of one vibe, wild skin, via SoulCore
+    int vibe = argc > 2 ? atoi(argv[2]) : 2;
+    uint32_t sd = argc > 3 ? (uint32_t)strtoul(argv[3], nullptr, 10) : 1;
+    const char* out = argc > 4 ? argv[4] : "wildtribe.png";
+    int cell = 300, cellH = cell * 4 / 3;
+    BufCanvas cv(4 * cell, 3 * cellH);
+    uint8_t* cov = (uint8_t*)calloc((size_t)cv.W * cv.H, 1);
+    wildPaper(cv, sd);
+    FaceTraits f;
+    WildTraits t;
+    for (int i = 0; i < 12; i++) {
+      do { rollFace(f, sd++); } while (f.idx[C_VIBE] != vibe);
+      rollWildFromCore(t, soulCore(f.seed));
+      drawWildFace(cv, cov, t, (i % 4 + 0.5f) * cell, (i / 4 + 0.47f) * cellH, cellH * 0.34f);
+    }
+    writePNG(out, cv);
+    printf("wrote %s (%s souls, wild skin)\n", out, T_VIBE[vibe].name);
+    free(cov);
+    return 0;
+  }
+
+  if (!strcmp(mode, "wildanim")) {  // boiling-line wild portrait, same loop as anim
+    int frames = argc > 3 ? atoi(argv[3]) : 64;
+    const char* out = argc > 4 ? argv[4] : "wildanim.gif";
+    const int pw = 240, ph = 320;
+    BufCanvas cv(pw, ph);
+    uint8_t* cov = (uint8_t*)calloc((size_t)cv.W * cv.H, 1);
+    uint8_t* paper = (uint8_t*)malloc((size_t)cv.W * cv.H * 3);
+    wildPaper(cv, seed);
+    memcpy(paper, cv.px, (size_t)cv.W * cv.H * 3);
+
+    WildTraits base, live;
+    rollWild(base, seed);
+    printf("seed %u  energy %.2f  wildanim\n", base.seed, base.energy);
+    uint32_t moodSeed = seed;
+    GifWriter gif;
+    bool gifOpen = false;
+
+    BufCanvas sheet(cv.W * 4, cv.H * 2);
+
+    for (int i = 0; i < frames; i++) {
+      if (i > 0 && i % 26 == 0) moodSeed = seed + i;           // mood swing
+      bool blink = (i % 21) == 12;
+
+      // look right, hold, look left, hold. +1 = right, -1 = left
+      const int turn = 10, hold = 18;
+      const int half = turn + hold, period = half * 2;
+      int p = i % period;
+      float look;
+      if (p < hold) look = 1.f;
+      else if (p < half) look = 1.f - 2.f * smoothf((p - hold) / (float)turn);
+      else if (p < half + hold) look = -1.f;
+      else look = -1.f + 2.f * smoothf((p - half - hold) / (float)turn);
+
+      live = base;
+      applyWildMood(live, moodSeed);
+      live.skew = look * 0.18f;
+      live.noseLean = base.noseLean + look * 0.10f;
+      live.mouthX = clampf(base.mouthX + look * 0.14f, -0.18f, 0.36f);
+      live.chinShift = base.chinShift + look * 0.20f;
+      live.wAsym = clampf(base.wAsym + look * 0.16f, 0.72f, 1.28f);
+      if (blink) { live.browY0 = -0.12f; live.browY1 = -0.14f; }
+
+      memcpy(cv.px, paper, (size_t)cv.W * cv.H * 3);
+      drawWildFace(cv, cov, live, cv.W * 0.5f + look * cv.W * 0.04f, cv.H * 0.47f,
+                   cv.H * 0.36f, base.seed * 31u + (i % 3));
+
+      if (!gifOpen) { gif.open(out, cv.W, cv.H, cv.px); gifOpen = true; }
+      gif.addFrame(cv.px, 12);  // ~8.3 fps, like the device
+      if (i % 3 == 0 && i / 3 < 8) {
+        int sx = (i / 3) % 4 * cv.W, sy = (i / 3) / 4 * cv.H;
+        for (int y = 0; y < cv.H; y++)
+          memcpy(sheet.px + (((size_t)(sy + y) * sheet.W) + sx) * 3,
+                 cv.px + (size_t)y * cv.W * 3, cv.W * 3);
+      }
+    }
+    gif.close();
+    writePNG("wildanim_sheet.png", sheet);
+    printf("wrote %s (%d frames) + wildanim_sheet.png\n", out, frames);
+    free(cov); free(paper);
     return 0;
   }
 

@@ -1,3 +1,6 @@
 extras/preview/preview
+extras/preview/*.png
+extras/preview/*.gif
+extras/preview/72
 *.o
 .DS_Store
