@@ -148,8 +148,7 @@ static inline void skinDrawWild(Canvas& cv, uint8_t* cov, uint32_t seed,
   static uint32_t cached = 0;
   static WildTraits t;
   if (cached != seed) { rollWildFromCore(t, soulCore(seed)); cached = seed; }
-  (void)speed;
-  drawWildFace(cv, cov, t, cx, cy, s, frameSeed);
+  drawWildFace(cv, cov, t, cx, cy, s, frameSeed, speed);
 }
 
 static inline void skinPoseDoodle(Canvas& cv, uint8_t* cov, uint32_t seed,
@@ -174,8 +173,7 @@ static inline void skinPoseWild(Canvas& cv, uint8_t* cov, uint32_t seed,
   WildTraits live = base;
   if (p.mood >= 0) applyWildMood(live, p.moodSeed + (uint32_t)p.mood * 2654435761u);
   live.turn = p.turn; live.pitch = p.pitch; live.roll = p.roll;
-  (void)speed;
-  drawWildFace(cv, cov, live, cx, cy, s, frameSeed);
+  drawWildFace(cv, cov, live, cx, cy, s, frameSeed, speed);
 }
 
 static const Skin DD_SKINS[] = {

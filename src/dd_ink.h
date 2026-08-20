@@ -51,15 +51,33 @@ struct Ink {
   float grain = 0;
   uint32_t grainSeed = 7;
 
+  // The tooth itself is precomputed into a 128x128 byte tile per grainSeed
+  // (a soul keeps one paper for life, so the tile survives across frames).
+  // Hashing per stamped pixel was a measurable slice of an MCU frame; the
+  // tile stays uint8 so a small chip keeps its heap for the framebuffer.
+  static uint8_t* grainTile(uint32_t seed) {
+    static uint8_t tile[128 * 128];
+    static uint32_t cached = 0xFFFFFFFFu;
+    if (cached != seed) {
+      cached = seed;
+      for (int y = 0; y < 128; y++)
+        for (int x = 0; x < 128; x++) {
+          uint32_t h1 = (uint32_t)((x >> 1) * 0x8DA6B343) ^ (uint32_t)((y >> 1) * 0xD8163841) ^ seed;
+          h1 = (h1 ^ (h1 >> 13)) * 0x5bd1e995u;
+          uint32_t h2 = (uint32_t)(x * 0x9E3779B1) ^ (uint32_t)(y * 0x85EBCA77) ^ seed;
+          h2 = (h2 ^ (h2 >> 13)) * 0x5bd1e995u;
+          float n = 0.65f * ((float)((h1 >> 8) & 0xFFFF) / 65535.0f)
+                  + 0.35f * ((float)((h2 >> 8) & 0xFFFF) / 65535.0f);
+          float tooth = n * n * (3 - 2 * n);   // clumpy
+          tile[y * 128 + x] = (uint8_t)(tooth * 255.0f + 0.5f);
+        }
+    }
+    return tile;
+  }
+
   float grainAt(int x, int y) const {
-    // coarse tooth (2px clumps) mixed with fine speckle
-    uint32_t h1 = (uint32_t)((x >> 1) * 0x8DA6B343) ^ (uint32_t)((y >> 1) * 0xD8163841) ^ grainSeed;
-    h1 = (h1 ^ (h1 >> 13)) * 0x5bd1e995u;
-    uint32_t h2 = (uint32_t)(x * 0x9E3779B1) ^ (uint32_t)(y * 0x85EBCA77) ^ grainSeed;
-    h2 = (h2 ^ (h2 >> 13)) * 0x5bd1e995u;
-    float n = 0.65f * ((float)((h1 >> 8) & 0xFFFF) / 65535.0f)
-            + 0.35f * ((float)((h2 >> 8) & 0xFFFF) / 65535.0f);
-    float tooth = n * n * (3 - 2 * n);      // clumpy
+    // coarse tooth (2px clumps) mixed with fine speckle, from the tile
+    float tooth = (float)grainTile(grainSeed)[(y & 127) * 128 + (x & 127)] * (1.0f / 255.0f);
     return (1.0f - grain) + grain * tooth;  // grain=0 solid, grain=1 fully toothy
   }
 
@@ -195,14 +213,61 @@ struct Ink {
   }
 
   // Stamp along a segment with lerped radius (fills gaps between samples).
+  // Without a clip polygon this rasterizes the whole segment as one
+  // capsule — exact distance-to-segment coverage, no overlapping discs —
+  // which visits each pixel once instead of three to six times. With a
+  // clip active it falls back to per-disc stamping (whose clip test is
+  // per stamp center, cheap); the capsule would need it per pixel.
   void stampSeg(float x0, float y0, float x1, float y1, float r0, float r1) {
+    if (clipN == 0) { stampCapsule(x0, y0, x1, y1, (r0 + r1) * 0.5f); return; }
     float d = hypotf2(x1 - x0, y1 - y0);
     float rm = (r0 < r1 ? r0 : r1);
-    float step = rm * 0.7f; if (step < 0.4f) step = 0.4f;
+    float step = rm * (speed ? 0.85f : 0.7f); if (step < 0.4f) step = 0.4f;
     int n = (int)(d / step) + 1;
     for (int i = 0; i <= n; i++) {
       float t = (float)i / (float)n;
       stamp(lerpf(x0, x1, t), lerpf(y0, y1, t), lerpf(r0, r1, t));
+    }
+  }
+
+  void stampCapsule(float x0, float y0, float x1, float y1, float r) {
+    if (r < 0.32f) r = 0.32f;
+    float bx0 = (x0 < x1 ? x0 : x1) - r - 1, bx1 = (x0 > x1 ? x0 : x1) + r + 1;
+    float by0 = (y0 < y1 ? y0 : y1) - r - 1, by1 = (y0 > y1 ? y0 : y1) + r + 1;
+    int ix0 = (int)floorf(bx0), ix1 = (int)ceilf(bx1);
+    int iy0 = (int)floorf(by0), iy1 = (int)ceilf(by1);
+    if (ix0 < 0) ix0 = 0; if (iy0 < 0) iy0 = 0;
+    if (ix1 >= cw) ix1 = cw - 1; if (iy1 >= ch) iy1 = ch - 1;
+    if (ix0 > ix1 || iy0 > iy1) return;
+    if (dx1 < 0) { dx0 = ix0; dy0 = iy0; dx1 = ix1; dy1 = iy1; }
+    if (ix0 < dx0) dx0 = ix0; if (iy0 < dy0) dy0 = iy0;
+    if (ix1 > dx1) dx1 = ix1; if (iy1 > dy1) dy1 = iy1;
+    float abx = x1 - x0, aby = y1 - y0;
+    float ab2 = abx * abx + aby * aby;
+    float inv = ab2 > 1e-6f ? 1.0f / ab2 : 0;
+    float R2 = (r + 0.5f) * (r + 0.5f);
+    float ri = r - 0.5f;
+    float Ri2 = ri > 0 ? ri * ri : 0;
+    float invW = 255.0f / (R2 - Ri2);
+    for (int py = iy0; py <= iy1; py++) {
+      float apy = (float)py + 0.5f - y0;
+      uint8_t* row = cov + py * cw;
+      if (py < spanRows) {
+        if (ix0 < rowMin[py]) rowMin[py] = (int16_t)ix0;
+        if (ix1 > rowMax[py]) rowMax[py] = (int16_t)ix1;
+      }
+      for (int px = ix0; px <= ix1; px++) {
+        float apx = (float)px + 0.5f - x0;
+        float tt = (apx * abx + apy * aby) * inv;
+        tt = tt < 0 ? 0 : (tt > 1 ? 1 : tt);
+        float dx = apx - abx * tt, dy = apy - aby * tt;
+        float d2 = dx * dx + dy * dy;
+        if (d2 >= R2) continue;
+        float c = d2 <= Ri2 ? 255.0f : (R2 - d2) * invW;
+        if (grain > 0) c *= grainAt(px, py);
+        uint8_t v = (uint8_t)c;
+        if (v > row[px]) row[px] = v;
+      }
     }
   }
 
@@ -326,8 +391,10 @@ struct Ink {
     }
     flush(ink, alpha * strokeFlush);
 
-    // dry granulation: ink crumbs off the edges, paper biting back in
-    if (w >= 1.2f) {
+    // dry granulation: ink crumbs off the edges, paper biting back in.
+    // Animation frames skip it for dry media — the grain texture already
+    // granulates, and the crumbs were a real slice of the budget.
+    if (w >= 1.2f && !(speed && grain > 0)) {
       uint8_t icol[3] = { ink.r, ink.g, ink.b };
       uint8_t pcol[3] = { paper.r, paper.g, paper.b };
       int cstep = speed ? 2 : 1;
